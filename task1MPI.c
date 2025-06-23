@@ -5,54 +5,52 @@
 
 int main(int argc, char **argv)
 {
+    MPI_Init(&argc, &argv);
+
     int rank, size;
     int array_size = 0;
-    int *arr = NULL;
+    int* array = NULL;
     int local_size = 0;
-    int *local_arr = NULL;
+    int* local_array = NULL;
     long long global_sum = 0, local_sum = 0;
     double start_time, end_time, total_time;
 
-    MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    if (rank == 0)
+
+    if (argc != 2) {
+        if (rank == 0) {
+            printf("Usage: %s <array_size>\n", argv[0]);
+        }
+        MPI_Finalize();
+        return 1;
+    }
+
+    array_size = atoi(argv[1]);
+    if (array_size <= 100000)
     {
-        FILE *fp = fopen("array_size.txt", "r"); // Файл с размером массива
-        if (fp == NULL)
-        {
-            fprintf(stderr, "Error: couldn't open the file array_size.txt\n");
-            MPI_Abort(MPI_COMM_WORLD, 1); // Завершаем MPI программу с кодом ошибки 1
+        if (rank == 0) {
+            printf(stderr, "Error: the size of the array must be larger 100000\n");
         }
-        if (fscanf(fp, "%d", &array_size) != 1)
-        {
-            fprintf(stderr, "Error: couldn't read the size of the array from the file\n");
-            fclose(fp);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        return 1;
+    }
+
+    if (rank == 0) {
+        array = (int*)malloc(array_size * sizeof(int));
+        if (array == NULL) {
+            printf("Memmory allocation failed\n");
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
-        fclose(fp);
-
-        if (array_size <= 100000)
-        {
-            fprintf(stderr, "Error: the size of the array must be larger 100000\n");
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-
-        arr = (int *)malloc(array_size * sizeof(int));
-        if (arr == NULL)
-        {
-            fprintf(stderr, "Memory allocation error in the process 0\n");
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-
-        // Инициализируем массив случайными числами
         srand(time(NULL));
         for (int i = 0; i < array_size; i++)
         {
-            arr[i] = rand() % 100;
+            array[i] = rand() % 100;
         }
     }
+
+    start_time = MPI_Wtime();
 
     MPI_Bcast(&array_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
@@ -62,8 +60,8 @@ int main(int argc, char **argv)
         local_size += array_size % size;
     }
 
-    local_arr = (int *)malloc(local_size * sizeof(int));
-    if (local_arr == NULL)
+    local_array = (int *)malloc(local_size * sizeof(int));
+    if (local_array == NULL)
     {
         fprintf(stderr, "Memory allocation error in the process %d\n", rank);
         MPI_Abort(MPI_COMM_WORLD, 1);
@@ -87,16 +85,15 @@ int main(int argc, char **argv)
         }
     }
 
-    MPI_Scatterv(arr, sendcounts, displs, MPI_INT,
-                 local_arr, local_size, MPI_INT,
+    MPI_Scatterv(array, sendcounts, displs, MPI_INT,
+                 local_array, local_size, MPI_INT,
                  0, MPI_COMM_WORLD);
 
-    start_time = MPI_Wtime();
 
     local_sum = 0;
     for (int i = 0; i < local_size; i++)
     {
-        local_sum += local_arr[i];
+        local_sum += local_array[i];
     }
 
     MPI_Reduce(&local_sum, &global_sum, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -106,17 +103,23 @@ int main(int argc, char **argv)
 
     if (rank == 0)
     {
-        printf("The sum of the array elements: %lld\n", global_sum);
-        printf("Execution time (in parallel with MPI): %.6f sec\n", total_time);
+        FILE* f = fopen("mpi_sum_time.txt", "a");
+        if (f == NULL) {
+            fprintf(stderr, "Error: Cannot open output file\n");
+            free(array);
+            return 1;
+        }
+        fprintf(f, "%lf\n", total_time);
+        fclose(f);
     }
 
     if (rank == 0)
     {
-        free(arr);
+        free(array);
         free(sendcounts);
         free(displs);
     }
-    free(local_arr);
+    free(local_array);
 
     MPI_Finalize();
     return 0;
